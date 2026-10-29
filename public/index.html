@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>代理 YouTube フロントエンド (検索機能付き)</title>
+    <style>
+        body { font-family: sans-serif; max-width: 1000px; margin: 40px auto; padding: 0 20px; background: #121212; color: #fff; }
+        .search-box { display: flex; gap: 10px; margin-bottom: 20px; }
+        input { flex: 1; padding: 12px; font-size: 16px; background: #222; color: #fff; border: 1px solid #444; border-radius: 4px; }
+        button { padding: 12px 24px; font-size: 16px; background: #ff0000; color: #fff; border: none; cursor: pointer; border-radius: 4px; font-weight: bold; }
+        button:hover { background: #cc0000; }
+        
+        .player-container { margin-bottom: 30px; display: none; background: #1a1a1a; padding: 15px; border-radius: 8px; }
+        video { width: 100%; max-height: 500px; background: #000; border-radius: 4px; }
+        
+        .results-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; }
+        .video-card { background: #1e1e1e; border-radius: 8px; overflow: hidden; cursor: pointer; transition: transform 0.2s; border: 1px solid #333; }
+        .video-card:hover { transform: translateY(-4px); background: #282828; }
+        .video-card img { width: 100%; aspect-ratio: 16/9; object-fit: cover; }
+        .video-info { padding: 10px; }
+        .video-title { font-size: 14px; font-weight: bold; margin: 0 0 6px 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .video-author { font-size: 12px; color: #aaa; margin: 0; }
+        
+        #status { text-align: center; color: #aaa; margin: 20px 0; font-size: 16px; }
+    </style>
+</head>
+<body>
+    <h1>🎬 代理 YouTube 検索＆プレイヤー</h1>
+    
+    <!-- 検索フォーム -->
+    <div class="search-box">
+        <input type="text" id="searchQuery" placeholder="検索キーワードを入力（例: 音楽, ガジェット）" onkeydown="if(event.key==='Enter') searchVideos()">
+        <button onclick="searchVideos()">検索</button>
+    </div>
+    
+    <div id="status"></div>
+
+    <!-- プレイヤーエリア（最初は非表示） -->
+    <div class="player-container" id="playerContainer">
+        <h2 id="videoTitle" style="margin-top:0;"></h2>
+        <video id="player" controls autoplay></video>
+    </div>
+
+    <!-- 検索結果一覧 -->
+    <div class="results-grid" id="resultsGrid"></div>
+
+    <script>
+        const statusDiv = document.getElementById('status');
+        const resultsGrid = document.getElementById('resultsGrid');
+        const playerContainer = document.getElementById('playerContainer');
+        const player = document.getElementById('player');
+        const videoTitle = document.getElementById('videoTitle');
+
+        // キーワード検索関数
+        async function searchVideos() {
+            const query = document.getElementById('searchQuery').value.trim();
+            if (!query) return;
+
+            statusDiv.innerText = 'プロキシ経由でYouTubeを検索中...';
+            resultsGrid.innerHTML = '';
+
+            try {
+                const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+                const data = await res.json();
+                
+                if (data.error || !data.videos || data.videos.length === 0) {
+                    statusDiv.innerText = data.error || '動画が見つかりませんでした。プロキシを変更して試してください。';
+                    return;
+                }
+
+                statusDiv.innerText = '';
+                
+                // カードを生成してグリッドに追加
+                data.videos.forEach(video => {
+                    const card = document.createElement('div');
+                    card.className = 'video-card';
+                    card.onclick = () => loadVideo(video.id);
+                    
+                    card.innerHTML = `
+                        <img src="${video.thumbnail}" alt="${video.title}">
+                        <div class="video-info">
+                            <p class="video-title">${video.title}</p>
+                            <p class="video-author">${video.author}</p>
+                        </div>
+                    `;
+                    resultsGrid.appendChild(card);
+                });
+            } catch (err) {
+                statusDiv.innerText = '通信エラーが発生しました。';
+            }
+        }
+
+        // 動画再生関数
+        async function loadVideo(id) {
+            statusDiv.innerText = 'ストリームURLを取得中...';
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+
+            try {
+                const res = await fetch(`/api/video/${id}`);
+                const data = await res.json();
+                
+                if (data.error || !data.streamUrl) {
+                    alert(data.error || '再生可能なURLが見つかりませんでした。');
+                    statusDiv.innerText = '';
+                    return;
+                }
+
+                statusDiv.innerText = '';
+                videoTitle.innerText = data.title;
+                player.src = data.streamUrl;
+                playerContainer.style.display = 'block';
+            } catch (err) {
+                alert('動画の読み込みに失敗しました。');
+                statusDiv.innerText = '';
+            }
+        }
+    </script>
+</body>
+</html>
