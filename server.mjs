@@ -26,7 +26,7 @@ async function refreshProxyPool() {
     const cdnUrl = 'https://jsdelivr.net';
     
     // タイムアウトを15秒（15000ms）に延長
-    const res = await axios.get(cdnUrl, { timeout: 15000 });
+    const res = await axios.get(cdnUrl, { timeout: 315000 });
     
     const proxies = res.data.split('\n').map(p => p.trim()).filter(p => p !== '');
     if (proxies.length > 0) {
