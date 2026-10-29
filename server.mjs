@@ -13,28 +13,44 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+// メモリ上に保持するプロキシプール
+let cachedProxies = [];
+
 /**
- * ⚡ jsDelivr CDN を経由してGitHubの最新HTTPプロキシリストを取得する関数
+ * 🚀 【新機能】サーバー起動時、および定期的にバックグラウンドでプロキシリストを取得する関数
+ * タイムアウトを15秒まで伸ばし、バックグラウンドで行うためユーザーを待たせません。
  */
-async function getFreeProxyFromCDN() {
+async function refreshProxyPool() {
   try {
-    // ProxyScrapeが5分おきに自動更新しているGitHubリポジトリをjsDelivr CDN経由で安全に読み込む
+    console.log('[Proxy Pool] プロキシリストをjsDelivrからバックグラウンドで取得中...');
     const cdnUrl = 'https://jsdelivr.net';
-    const res = await axios.get(cdnUrl, { timeout: 4000 });
     
-    // 改行で分割して有効なIPの配列を作成
+    // タイムアウトを15秒（15000ms）に延長
+    const res = await axios.get(cdnUrl, { timeout: 15000 });
+    
     const proxies = res.data.split('\n').map(p => p.trim()).filter(p => p !== '');
-    
     if (proxies.length > 0) {
-      // 取得したリストからランダムに1つ選択
-      const randomIndex = Math.floor(Math.random() * proxies.length);
-      const proxy = proxies[randomIndex];
-      return `http://${proxy}`;
+      cachedProxies = proxies;
+      console.log(`[Proxy Pool] 更新成功。現在 ${cachedProxies.length} 個のプロキシが利用可能です。`);
     }
   } catch (err) {
-    console.log('[Proxy] jsDelivr経由でのプロキシ取得に失敗しました。ローカルIPを使用します。:', err.message);
+    console.error('[Proxy Pool] プロキシリストの更新に失敗しました:', err.message);
   }
-  return null;
+}
+
+// 1. サーバー起動時に一回リストを取得する
+refreshProxyPool();
+
+// 2. 15分ごとにバックグラウンドでプロキシリストを自動更新する
+setInterval(refreshProxyPool, 15 * 60 * 1000);
+
+/**
+ * メモリ内のプールからランダムにプロキシを1つ返す関数（超高速・通信なし）
+ */
+function getProxyFromCache() {
+  if (cachedProxies.length === 0) return null;
+  const randomIndex = Math.floor(Math.random() * cachedProxies.length);
+  return `http://${cachedProxies[randomIndex]}`;
 }
 
 /**
@@ -44,15 +60,15 @@ app.get('/api/search', async (req, res) => {
   const query = req.query.q;
   if (!query) return res.status(400).json({ error: '検索キーワードが必要です' });
 
-  const proxyUrl = await getFreeProxyFromCDN();
+  const proxyUrl = getProxyFromCache();
   let options = {};
 
   if (proxyUrl) {
-    console.log(`[Proxy Search] jsDelivrプールから使用: ${proxyUrl}`);
+    console.log(`[Proxy Search] メモリキャッシュから使用: ${proxyUrl}`);
     const agent = new HttpsProxyAgent(proxyUrl);
     options.fetch = (url, init) => fetch(url, { ...init, agent });
   } else {
-    console.log('[Proxy Search] プロキシなし（ローカルIP）で接続します');
+    console.log('[Proxy Search] プロキシキャッシュが空のため、ローカルIPで接続します');
   }
 
   try {
@@ -87,15 +103,13 @@ app.get('/api/search', async (req, res) => {
  */
 app.get('/api/video/:id', async (req, res) => {
   const videoId = req.params.id;
-  const proxyUrl = await getFreeProxyFromCDN();
+  const proxyUrl = getProxyFromCache();
   let options = {};
 
   if (proxyUrl) {
-    console.log(`[Proxy Video] jsDelivrプールから使用: ${proxyUrl}`);
+    console.log(`[Proxy Video] メモリキャッシュから使用: ${proxyUrl}`);
     const agent = new HttpsProxyAgent(proxyUrl);
     options.fetch = (url, init) => fetch(url, { ...init, agent });
-  } else {
-    console.log('[Proxy Video] プロキシなし（ローカルIP）で接続します');
   }
 
   try {
