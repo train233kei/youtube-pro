@@ -3,7 +3,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { Innertube } from 'youtubei.js';
 import { HttpsProxyAgent } from 'https-proxy-agent';
-import axios from 'axios';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,24 +13,25 @@ const PORT = process.env.PORT || 3000;
 app.use(express.static(path.join(__dirname, 'public')));
 
 /**
- * 【強化版】無料プロキシリストをGitHubのパブリックソースから取得する関数
+ * 🔒 静的に定義された無料プロキシプール
+ * ※ getaddrinfoエラーを避けるため、コード内に直接持たせます。
+ * (無料プロキシは生存期間が短いため、動かなくなったらここのIPを定期的に書き換えるか、
+ *  環境変数 PROXY_LIST にカンマ区切りでRenderの管理画面から投入できるようにします)
  */
-async function getFreeProxy() {
-  try {
-    // 稼働率の高いパブリックなプロキシリスト（テキスト形式）を数種類から取得
-    const res = await axios.get('https://githubusercontent.com', { timeout: 3000 });
-    const proxies = res.data.split('\n').filter(p => p.trim() !== '');
-    
-    if (proxies.length > 0) {
-      // 取得したリストからランダムに1つ選ぶ
-      const randomIndex = Math.floor(Math.random() * proxies.length);
-      const proxy = proxies[randomIndex].trim();
-      return `http://${proxy}`;
-    }
-  } catch (err) {
-    console.log('[Proxy] 外部プロキシリストの取得に失敗しました。ローカルIPを使用します。:', err.message);
-  }
-  return null;
+const STATIC_PROXIES = [
+  'http://43.200.77.123:80',    // サンプルIP (実際にお使いの際は、公開されている最新のHTTP/HTTPSプロキシに差し替えてください)
+  'http://13.208.55.22:3128',
+  'http://15.152.112.45:8080'
+];
+
+function getStaticProxy() {
+  // Renderの環境変数に PROXY_LIST が設定されていればそれを優先
+  const envProxies = process.env.PROXY_LIST ? process.env.PROXY_LIST.split(',') : [];
+  const pool = envProxies.length > 0 ? envProxies : STATIC_PROXIES;
+  
+  if (pool.length === 0) return null;
+  const randomIndex = Math.floor(Math.random() * pool.length);
+  return pool[randomIndex].trim();
 }
 
 /**
@@ -41,11 +41,11 @@ app.get('/api/search', async (req, res) => {
   const query = req.query.q;
   if (!query) return res.status(400).json({ error: '検索キーワードが必要です' });
 
-  const proxyUrl = await getFreeProxy();
+  const proxyUrl = getStaticProxy();
   let options = {};
 
   if (proxyUrl) {
-    console.log(`[Proxy Search] 使用中: ${proxyUrl}`);
+    console.log(`[Proxy Search] 静的プールから使用: ${proxyUrl}`);
     const agent = new HttpsProxyAgent(proxyUrl);
     options.fetch = (url, init) => fetch(url, { ...init, agent });
   }
@@ -73,7 +73,7 @@ app.get('/api/search', async (req, res) => {
     res.json({ videos });
   } catch (error) {
     console.error('[Search Error]', error.message);
-    res.status(500).json({ error: 'YouTubeの検索に失敗しました。ライブラリの更新を待つか、プロキシを変更してください。' });
+    res.status(500).json({ error: `検索に失敗しました。原因: ${error.message}` });
   }
 });
 
@@ -82,11 +82,11 @@ app.get('/api/search', async (req, res) => {
  */
 app.get('/api/video/:id', async (req, res) => {
   const videoId = req.params.id;
-  const proxyUrl = await getFreeProxy();
+  const proxyUrl = getStaticProxy();
   let options = {};
 
   if (proxyUrl) {
-    console.log(`[Proxy Video] 使用中: ${proxyUrl}`);
+    console.log(`[Proxy Video] 静的プールから使用: ${proxyUrl}`);
     const agent = new HttpsProxyAgent(proxyUrl);
     options.fetch = (url, init) => fetch(url, { ...init, agent });
   }
@@ -103,7 +103,7 @@ app.get('/api/video/:id', async (req, res) => {
     });
   } catch (error) {
     console.error('[Video Error]', error.message);
-    res.status(500).json({ error: '動画データの取得に失敗しました。' });
+    res.status(500).json({ error: `動画の取得に失敗しました。原因: ${error.message}` });
   }
 });
 
