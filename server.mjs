@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { Innertube } from 'youtubei.js';
 import { HttpsProxyAgent } from 'https-proxy-agent';
+import axios from 'axios';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,25 +14,27 @@ const PORT = process.env.PORT || 3000;
 app.use(express.static(path.join(__dirname, 'public')));
 
 /**
- * 🔒 静的に定義された無料プロキシプール
- * ※ getaddrinfoエラーを避けるため、コード内に直接持たせます。
- * (無料プロキシは生存期間が短いため、動かなくなったらここのIPを定期的に書き換えるか、
- *  環境変数 PROXY_LIST にカンマ区切りでRenderの管理画面から投入できるようにします)
+ * ⚡ jsDelivr CDN を経由してGitHubの最新HTTPプロキシリストを取得する関数
  */
-const STATIC_PROXIES = [
-  'http://43.200.77.123:80',    // サンプルIP (実際にお使いの際は、公開されている最新のHTTP/HTTPSプロキシに差し替えてください)
-  'http://13.208.55.22:3128',
-  'http://15.152.112.45:8080'
-];
-
-function getStaticProxy() {
-  // Renderの環境変数に PROXY_LIST が設定されていればそれを優先
-  const envProxies = process.env.PROXY_LIST ? process.env.PROXY_LIST.split(',') : [];
-  const pool = envProxies.length > 0 ? envProxies : STATIC_PROXIES;
-  
-  if (pool.length === 0) return null;
-  const randomIndex = Math.floor(Math.random() * pool.length);
-  return pool[randomIndex].trim();
+async function getFreeProxyFromCDN() {
+  try {
+    // ProxyScrapeが5分おきに自動更新しているGitHubリポジトリをjsDelivr CDN経由で安全に読み込む
+    const cdnUrl = 'https://jsdelivr.net';
+    const res = await axios.get(cdnUrl, { timeout: 4000 });
+    
+    // 改行で分割して有効なIPの配列を作成
+    const proxies = res.data.split('\n').map(p => p.trim()).filter(p => p !== '');
+    
+    if (proxies.length > 0) {
+      // 取得したリストからランダムに1つ選択
+      const randomIndex = Math.floor(Math.random() * proxies.length);
+      const proxy = proxies[randomIndex];
+      return `http://${proxy}`;
+    }
+  } catch (err) {
+    console.log('[Proxy] jsDelivr経由でのプロキシ取得に失敗しました。ローカルIPを使用します。:', err.message);
+  }
+  return null;
 }
 
 /**
@@ -41,13 +44,15 @@ app.get('/api/search', async (req, res) => {
   const query = req.query.q;
   if (!query) return res.status(400).json({ error: '検索キーワードが必要です' });
 
-  const proxyUrl = getStaticProxy();
+  const proxyUrl = await getFreeProxyFromCDN();
   let options = {};
 
   if (proxyUrl) {
-    console.log(`[Proxy Search] 静的プールから使用: ${proxyUrl}`);
+    console.log(`[Proxy Search] jsDelivrプールから使用: ${proxyUrl}`);
     const agent = new HttpsProxyAgent(proxyUrl);
     options.fetch = (url, init) => fetch(url, { ...init, agent });
+  } else {
+    console.log('[Proxy Search] プロキシなし（ローカルIP）で接続します');
   }
 
   try {
@@ -57,7 +62,7 @@ app.get('/api/search', async (req, res) => {
     const videos = (searchResults.videos || []).map(video => {
       let thumbnailUrl = '';
       if (video.thumbnails && video.thumbnails.length > 0) {
-        thumbnailUrl = video.thumbnails[0].url;
+        thumbnailUrl = video.thumbnails[0].url || video.thumbnails.url;
       } else if (video.thumbnail && video.thumbnail.url) {
         thumbnailUrl = video.thumbnail.url;
       }
@@ -82,13 +87,15 @@ app.get('/api/search', async (req, res) => {
  */
 app.get('/api/video/:id', async (req, res) => {
   const videoId = req.params.id;
-  const proxyUrl = getStaticProxy();
+  const proxyUrl = await getFreeProxyFromCDN();
   let options = {};
 
   if (proxyUrl) {
-    console.log(`[Proxy Video] 静的プールから使用: ${proxyUrl}`);
+    console.log(`[Proxy Video] jsDelivrプールから使用: ${proxyUrl}`);
     const agent = new HttpsProxyAgent(proxyUrl);
     options.fetch = (url, init) => fetch(url, { ...init, agent });
+  } else {
+    console.log('[Proxy Video] プロキシなし（ローカルIP）で接続します');
   }
 
   try {
