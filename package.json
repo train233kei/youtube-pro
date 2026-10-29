@@ -9,6 +9,6 @@
     "axios": "^1.7.0",
     "express": "^4.19.0",
     "https-proxy-agent": "^7.0.0",
-    "youtubei.js": "^12.2.0"
+    "youtubei.js": "latest" 
   }
 }
